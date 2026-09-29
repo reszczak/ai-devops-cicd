@@ -1,0 +1,166 @@
+name: Deploy quotes-api
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/deploy.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/deploy.yml"
+
+# Deny-by-default na poziomie workflow — każdy job dostaje tylko to,
+# co jawnie sobie doda w swoim bloku `permissions:` (patrz docs/github-actions-permissions.md).
+permissions: {}
+
+env:
+  AWS_REGION: eu-central-1
+  PYTHON_VERSION: "3.12"
+
+# Push na main w trakcie trwającego deployu nie anuluje poprzedniego —
+# wdrożenia na ten sam namespace mają iść jedno po drugim, nie równolegle.
+concurrency:
+  group: deploy-quotes-api-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # 1. lint — tylko czyta kod z checkout, nic więcej nie robi.
+  #    permissions: contents: read wystarcza do `actions/checkout`.
+  # ──────────────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: app/requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+        working-directory: app
+
+      - run: ruff check .
+        working-directory: app
+
+  # ──────────────────────────────────────────────────────────────────
+  # 2. test — jak lint: tylko odczyt repo, bez dostępu do AWS ani sekretów.
+  # ──────────────────────────────────────────────────────────────────
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: app/requirements-dev.txt
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+        working-directory: app
+
+      - run: pytest -q
+        working-directory: app
+
+  # ──────────────────────────────────────────────────────────────────
+  # 3. build — jedyny job do tego miejsca, który wychodzi poza repo (do AWS),
+  #    więc jedyny, który dostaje `id-token: write` do OIDC. Bez niego
+  #    `aws-actions/configure-aws-credentials` nie ma czym wymienić się z AWS.
+  #    Uruchamiamy go tylko dla push na main (nie dla PR) — trust policy roli
+  #    IAM jest zawężona do `ref:refs/heads/main` (patrz docs/github-actions-permissions.md,
+  #    punkt 5), więc PR i tak nie dostałby poświadczeń.
+  # ──────────────────────────────────────────────────────────────────
+  build:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Tag obrazu = SHA commita, zgodnie z komentarzem w app/k8s-dzien1/deployment.yaml
+      # ("Pipeline podmienia znacznik na pełny adres obrazu z ECR, tag = SHA commita").
+      # Nazwa repozytorium ECR jest stała ("quotes-api", patrz start/README-zadanie.md) —
+      # nie ma osobnej zmiennej repozytorium na ten adres.
+      - id: image
+        run: echo "uri=${{ steps.ecr-login.outputs.registry }}/quotes-api:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.uri }}
+          build-args: APP_VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────
+  # 4. deploy — jedyny job z dostępem do klastra EKS, więc też jedyny (poza build)
+  #    z `id-token: write`. Osobne wywołanie configure-aws-credentials w tym jobie,
+  #    bo poświadczenia z joba build nie przechodzą między jobami — każdy job to
+  #    nowy runner. Nadal tylko push na main (patrz warunek `if` — ten sam powód
+  #    co w build: trust policy roli i brak sekretów na PR z forka).
+  # ──────────────────────────────────────────────────────────────────
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: azure/setup-kubectl@v4
+
+      # Nazwa klastra jest stała dla całego szkolenia (setup/README.md) —
+      # nie ma osobnej zmiennej repozytorium na ten adres.
+      - run: aws eks update-kubeconfig --name szkolenie-ai-devops --region "${{ env.AWS_REGION }}"
+
+      - name: Sprawdź, czy namespace istnieje
+        run: kubectl get namespace "${{ vars.K8S_NAMESPACE }}"
+
+      - name: Wdróż manifesty dzień 1 (zwykły Deployment, bez Argo Rollouts)
+        run: |
+          sed "s|PODMIEN_NA_OBRAZ|${{ needs.build.outputs.image }}|" k8s-dzien1/deployment.yaml \
+            | kubectl apply -n "${{ vars.K8S_NAMESPACE }}" -f -
+          kubectl apply -n "${{ vars.K8S_NAMESPACE }}" -f k8s-dzien1/service.yaml
+        working-directory: app
+
+      - name: Poczekaj na gotowość Deploymentu
+        run: kubectl rollout status deployment/quotes-api-d1 -n "${{ vars.K8S_NAMESPACE }}" --timeout=180s
