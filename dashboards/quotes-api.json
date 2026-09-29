@@ -1,0 +1,167 @@
+{
+  "uid": "quotes-api-ruch-i-repliki",
+  "title": "quotes-api — ruch, opóźnienia, błędy, repliki (HPA)",
+  "tags": ["quotes-api", "szkolenie"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Źródło danych",
+        "type": "datasource",
+        "query": "prometheus"
+      },
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(quotes_requests_total, namespace)", "refId": "ns" },
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "canary_hash",
+        "label": "Hash canary (wersja)",
+        "description": "Wartość etykiety `wersja` dla canary, np. z `kubectl argo rollouts get rollout quotes-api`. Puste/domyślne = brak canary, cały ruch to stable.",
+        "type": "textbox",
+        "query": "brak",
+        "current": { "text": "brak", "value": "brak" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Żądania na sekundę — stable vs canary",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "stable",
+          "expr": "sum(rate(quotes_requests_total{namespace=\"$namespace\", wersja!=\"$canary_hash\"}[2m]))"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "canary",
+          "expr": "sum(rate(quotes_requests_total{namespace=\"$namespace\", wersja=\"$canary_hash\"}[2m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0 },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "stable" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "canary" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Czas odpowiedzi p95",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "stable",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(quotes_request_seconds_bucket{namespace=\"$namespace\", wersja!=\"$canary_hash\"}[5m])))"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "canary",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(quotes_request_seconds_bucket{namespace=\"$namespace\", wersja=\"$canary_hash\"}[5m])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "stable" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "canary" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Odsetek odpowiedzi 5xx",
+      "description": "Ta sama formuła co w AnalysisTemplate `odsetek-bledow`. Brak ruchu = brak danych, nie zero.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "stable",
+          "expr": "(sum(rate(quotes_requests_total{namespace=\"$namespace\", wersja!=\"$canary_hash\", status=~\"5..\"}[2m])) or vector(0)) / sum(rate(quotes_requests_total{namespace=\"$namespace\", wersja!=\"$canary_hash\"}[2m]))"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "canary",
+          "expr": "(sum(rate(quotes_requests_total{namespace=\"$namespace\", wersja=\"$canary_hash\", status=~\"5..\"}[2m])) or vector(0)) / sum(rate(quotes_requests_total{namespace=\"$namespace\", wersja=\"$canary_hash\"}[2m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "decimals": 2 },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "stable" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "canary" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Liczba replik — z progami HPA",
+      "description": "Repliki quotes-api (ReplicaSety Rolloutu — Rollout nie jest Deploymentem, więc kube_deployment_* go nie widzi). Linie przerywane: minReplicas i maxReplicas z HPA.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "repliki (Rollout: stable + canary)",
+          "expr": "sum(kube_replicaset_status_replicas{namespace=\"$namespace\", replicaset=~\"quotes-api-[a-f0-9]+\"})"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "repliki (Deployment dzień 1)",
+          "expr": "sum(kube_deployment_status_replicas{namespace=\"$namespace\", deployment=\"quotes-api-d1\"})"
+        },
+        {
+          "refId": "C",
+          "legendFormat": "HPA min",
+          "expr": "max(kube_horizontalpodautoscaler_spec_min_replicas{namespace=\"$namespace\", horizontalpodautoscaler=\"quotes-api\"})"
+        },
+        {
+          "refId": "D",
+          "legendFormat": "HPA max",
+          "expr": "max(kube_horizontalpodautoscaler_spec_max_replicas{namespace=\"$namespace\", horizontalpodautoscaler=\"quotes-api\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "decimals": 0 },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "HPA (min|max)" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    }
+  ]
+}

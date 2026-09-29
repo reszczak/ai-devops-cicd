@@ -4,7 +4,20 @@
     "nowy-format-cytatu": {
       "state": "ENABLED",
       "variants": { "on": true, "off": false },
-      "defaultVariant": "off"
+      "defaultVariant": "off",
+      "targeting": {
+        "if": [
+          { "==": [{ "var": "beta" }, "true"] },
+          "on",
+          {
+            "fractional": [
+              { "cat": [{ "var": "$flagd.flagKey" }, { "var": "targetingKey" }] },
+              ["on", 20],
+              ["off", 80]
+            ]
+          }
+        ]
+      }
     }
   }
 }

@@ -13,3 +13,9 @@ variable "vpc_id" {
   description = "ID VPC, w której działa kolektor"
   type        = string
 }
+
+variable "cidr_vpc" {
+  description = "Zakres adresów VPC, z którego kolektor przyjmuje syslog"
+  type        = string
+  default     = "10.20.0.0/16"
+}

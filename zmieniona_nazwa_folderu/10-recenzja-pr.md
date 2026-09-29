@@ -18,6 +18,12 @@ sekrety poza `run:`, brak `pull_request_target` z checkoutem forka.
 **Python** — obsługa błędów, zapytania w pętli, dane wrażliwe w logach, brak testu
 do nowej ścieżki kodu.
 
+**Reguła zespołu: timeout przy wywołaniach HTTP** — każde wywołanie zewnętrznego
+serwisu (`requests`, `httpx`, `urllib`) musi mieć jawny timeout (connect i read).
+Brak timeoutu zgłaszaj jako `WAŻNE`; w handlerze FastAPI, na ścieżce obsługującej
+żądania, jako `BLOKUJĄCE`. Scenariusz: zależność przestaje odpowiadać, wątki robocze
+zawisają i `quotes-api` przestaje odpowiadać na probe'y — Kubernetes restartuje pody.
+
 ## Format znaleziska
 
 ```

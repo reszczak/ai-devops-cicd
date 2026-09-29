@@ -27,9 +27,9 @@ set -a; source .env; set +a
 
 Zapisz trzy liczby:
 
-- ile sekund minęło od startu obciążenia do pierwszej **działającej** nowej repliki
-- do ilu replik doszło skalowanie
-- jaki był p95 czasu odpowiedzi w szczycie
+- ile sekund minęło od startu obciążenia do pierwszej **działającej** nowej repliki - 30
+- do ilu replik doszło skalowanie - 3
+- jaki był p95 czasu odpowiedzi w szczycie - 684 ms
 
 ### Etap 2 — dostrój (10 min)
 

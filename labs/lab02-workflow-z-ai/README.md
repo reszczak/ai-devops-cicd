@@ -26,7 +26,7 @@ Prompt startowy jest w `prompts/blok2-pipeline.md`, sekcja „Workflow od zera".
 Możesz go użyć wprost albo napisać własny. Wynikiem ma być dokładnie plik:
 
 ```text
-<root Twojego repo>/.github/workflows/deploy.yml
+reszczak/ai-devops-cicd/.github/workflows/deploy.yml
 ```
 
 Każdy uczestnik wykonuje zadanie w swoim repozytorium lub forku. Katalog `.github/workflows/`
@@ -47,7 +47,7 @@ Przed pierwszym pushem ustaw zmienne repozytorium (wartości masz w `.env` i od 
 
 ```bash
 set -a; source .env; set +a
-gh variable set AWS_DEPLOY_ROLE_ARN --body "arn:aws:iam::<KONTO>:role/github-actions-deploy"
+gh variable set AWS_DEPLOY_ROLE_ARN --body " arn:aws:iam::574921529806:user/dawid-r/github-actions-deploy"
 gh variable set K8S_NAMESPACE --body "$UCZESTNIK"
 gh variable list                # obie zmienne mają być w Twoim forku
 ```
